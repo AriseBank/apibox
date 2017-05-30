@@ -14,6 +14,10 @@ and get and do a part of Proof of Work(PoW) until one of workers finish the PoW.
 
 ## Building
 
+You will need C compiler to compile PoW routine in C.
+
+You will need C compiler and OpenCL environemnt(hardware and software) to compile PoW routine for GPU.
+
 Build the server :
 
 ```
