@@ -49,38 +49,6 @@ func (h *Handler) reset() {
 	<-h.ready
 }
 
-func bypass(iri string, w http.ResponseWriter, b []byte) error {
-	rd := bytes.NewReader(b)
-	req, err := http.NewRequest("POST", iri, rd)
-	if err != nil {
-		return err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err = resp.Body.Close(); err != nil {
-			log.Println(err)
-		}
-	}()
-
-	bs, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	origin := resp.Header.Get("Access-Control-Allow-Origin")
-	if origin != "" {
-		w.Header().Set("Access-Control-Allow-Origin", origin)
-	}
-	w.WriteHeader(resp.StatusCode)
-	_, err = w.Write(bs)
-	return err
-}
-
 //ServeAPI handles API.
 //If not AttachToTangle command, just call IRI server and returns its response.
 //If AttachToTangle, do PoW by myself or workers.
@@ -116,6 +84,38 @@ func (h *Handler) ServeAPI(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func bypass(iri string, w http.ResponseWriter, b []byte) error {
+	rd := bytes.NewReader(b)
+	req, err := http.NewRequest("POST", iri, rd)
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err = resp.Body.Close(); err != nil {
+			log.Println(err)
+		}
+	}()
+
+	bs, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	origin := resp.Header.Get("Access-Control-Allow-Origin")
+	if origin != "" {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+	}
+	w.WriteHeader(resp.StatusCode)
+	_, err = w.Write(bs)
+	return err
+}
+
 //ServeControl handles controls.
 func (h *Handler) ServeControl(w http.ResponseWriter, r *http.Request) {
 	cmd := r.FormValue("cmd")
@@ -133,6 +133,7 @@ func (h *Handler) ServeControl(w http.ResponseWriter, r *http.Request) {
 	}
 	switch cmd {
 	case "getwork":
+		log.Println("called getwork")
 		var t common.Task
 		if h.task != nil {
 			t = *h.task
@@ -141,7 +142,8 @@ func (h *Handler) ServeControl(w http.ResponseWriter, r *http.Request) {
 		h.nWorker++
 		common.WriteJSON(w, t)
 	case "finished":
-		trytes := giota.Trytes(r.FormValue("Trytes"))
+		log.Println("called finished")
+		trytes := giota.Trytes(r.FormValue("trytes"))
 		tx, err := giota.NewTransaction(trytes)
 		if err != nil {
 			log.Print(err)
@@ -153,7 +155,9 @@ func (h *Handler) ServeControl(w http.ResponseWriter, r *http.Request) {
 		}
 		h.result <- trytes
 		h.reset()
+		fallthrough
 	case "getstatus":
+		log.Println("called getstatus")
 		id := r.FormValue("ID")
 		if id != "" && id != strconv.Itoa(int(h.task.ID)) {
 			log.Print("incorrect ID", id)
@@ -170,25 +174,6 @@ func (h *Handler) ServeControl(w http.ResponseWriter, r *http.Request) {
 			Working: isWorking,
 		})
 	}
-}
-
-func (h *Handler) goPow() {
-	go func() {
-		for {
-			if h.task == nil {
-				time.Sleep(15 * time.Second)
-				continue
-			}
-			trytes, err := h.task.Pow()
-			if err != nil {
-				log.Print(err)
-				continue
-			}
-			h.task = nil
-			h.result <- trytes
-			<-h.ready
-		}
-	}()
 }
 
 func (h *Handler) attachToTangle(w http.ResponseWriter, b []byte) error {
@@ -241,6 +226,25 @@ func (h *Handler) attachToTangle(w http.ResponseWriter, b []byte) error {
 	return err
 }
 
+func (h *Handler) goPow() {
+	go func() {
+		for {
+			if h.task == nil {
+				time.Sleep(15 * time.Second)
+				continue
+			}
+			trytes, err := h.task.Pow()
+			if err != nil {
+				log.Print(err)
+				continue
+			}
+			h.task = nil
+			h.result <- trytes
+			<-h.ready
+		}
+	}()
+}
+
 func main() {
 	bytes, err := ioutil.ReadFile("server.json")
 	if err != nil {
@@ -266,8 +270,8 @@ func main() {
 	s := &http.Server{
 		Addr:           fmt.Sprintf(":%d", cfg.ListenPort),
 		Handler:        http.DefaultServeMux,
-		ReadTimeout:    3 * time.Minute,
-		WriteTimeout:   3 * time.Minute,
+		ReadTimeout:    30 * time.Minute,
+		WriteTimeout:   30 * time.Minute,
 		MaxHeaderBytes: 1 << 20,
 	}
 	if cfg.Standalone {

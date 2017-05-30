@@ -29,7 +29,6 @@ func readJSON(resp *http.Response, t interface{}) error {
 	if err != nil {
 		return err
 	}
-	log.Print(string(b))
 	if err := json.Unmarshal(b, t); err != nil {
 		return err
 	}
@@ -42,7 +41,7 @@ func (w *work) getstatus() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	values := url.Values{}
+	var values url.Values
 	client := new(http.Client)
 	finished := false
 	for {
@@ -51,11 +50,11 @@ func (w *work) getstatus() {
 			continue
 		}
 		if w.result != "" {
-			values.Add("cmd", "finished")
-			values.Add("trytes", string(w.result))
+			log.Println("sending finished...")
+			values = url.Values{"cmd": {"finished"}, "trytes": {string(w.result)}}
 			finished = true
 		} else {
-			values.Add("cmd", "getstatus")
+			values = url.Values{"cmd": {"getstatus"}}
 		}
 		req.URL.RawQuery = values.Encode()
 		resp, err := client.Do(req)

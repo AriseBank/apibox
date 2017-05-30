@@ -1,5 +1,4 @@
 [![Build Status](https://travis-ci.org/iotaledger/apibox.svg?branch=master)](https://travis-ci.org/iotaledger/apibox)
-[![GoDoc](https://godoc.org/github.com/iotaledger/apibox?status.svg)](https://godoc.org/github.com/iotaledger/apibox)
 [![GitHub license](https://img.shields.io/badge/license-MIT-blue.svg)](https://raw.githubusercontent.com/iotaledger/apibox/master/LICENSE)
 
 # Status: Debugging, not work.
@@ -39,7 +38,7 @@ If you want to use GPU for PoW, add `-tags=gpu` option.
 
 ## Server Settings
 
-`server.json` in server directory is the settings for server. Parameters are:
+[server.json](server/server.json) in server directory is the settings for server. Parameters are:
 
 * `debug`: If true, print log to stdout.
 * `listen_port`: listen port for API and workers.
@@ -63,13 +62,13 @@ $ server/server
 Run workers as many as you want:
 
 ```
-$ work/worker -url="http://server1:14265"
+$ worker/worker -url="http://server1:14265"
 ```
 
 TODO
 =========================
 
-* [ ] Ttests :(
+* [ ] Tests :(
 
 <hr>
 
