@@ -2,5 +2,6 @@ package: github.com/iotaledger/apibox
 import:
 - package: github.com/didip/tollbooth
 - package: github.com/iotaledger/giota
-- package: gopkg.in/natefinch/lumberjack.v2
-  version: v1.0
+- package: github.com/natefinch/lumberjack
+  vcs: git
+  version: 2.0

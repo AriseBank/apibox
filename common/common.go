@@ -12,8 +12,7 @@ import (
 	"strings"
 
 	"github.com/iotaledger/giota"
-
-	lumberjack "gopkg.in/natefinch/lumberjack.v2"
+	"github.com/natefinch/lumberjack"
 )
 
 //Status represents PoW status

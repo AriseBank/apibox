@@ -114,6 +114,7 @@ func main() {
 	var server string
 	flag.BoolVar(&verbose, "verbose", false, "print logs")
 	flag.StringVar(&server, "url", "http://localhost:14265", "server ip:port")
+	flag.Parse()
 	common.SetLogger(".", verbose)
 	log.Println("connecting...")
 	w := work{
