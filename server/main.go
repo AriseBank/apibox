@@ -18,11 +18,11 @@ import (
 
 //Config contains configs for server.
 type Config struct {
-	Debug        bool     `json:"debug"`
 	ListenPort   int      `json:"listen_port"`
 	IRIserver    string   `json:"iri_server_port"`
 	AllowRequest []string `json:"allowed_request"`
 	AllowWorker  []string `json:"allowed_worker"`
+	Debug        bool     `json:"debug"`
 	Standalone   bool     `json:"standalone"`
 }
 

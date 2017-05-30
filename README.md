@@ -1,8 +1,6 @@
 [![Build Status](https://travis-ci.org/iotaledger/apibox.svg?branch=master)](https://travis-ci.org/iotaledger/apibox)
 [![GitHub license](https://img.shields.io/badge/license-MIT-blue.svg)](https://raw.githubusercontent.com/iotaledger/apibox/master/LICENSE)
 
-# Status: Debugging, not work.
-
 # :baby_chick: IOTA APIBOX
 
 ## API endpoints

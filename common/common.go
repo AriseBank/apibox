@@ -73,7 +73,7 @@ func (t *Task) StopPow() {
 
 //Loop loops func f for 5 times.
 func Loop(f func() error) error {
-	i := 0
+	var i int
 	var err error
 	for i = 0; i < 5; i++ {
 		if err = f(); err == nil {
@@ -144,12 +144,12 @@ func Allowed(cs []string, remote string) bool {
 		log.Fatal("invalid remote address " + remote)
 	}
 	for _, item := range cs {
-		if strings.Index(item, "-") >= 0 {
+		if strings.Contains(item, "-") {
 			cs = append(cs, strings.Split(item, "-")...)
 		}
 	}
 	for _, item := range cs {
-		if strings.Index(item, "/") < 0 {
+		if !strings.Contains(item, "/") {
 			a := net.ParseIP(item)
 			if a == nil {
 				log.Fatal("invalid IP address in config file", item)

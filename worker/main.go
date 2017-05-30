@@ -43,7 +43,6 @@ func (w *work) getstatus() {
 	}
 	var values url.Values
 	client := new(http.Client)
-	finished := false
 	for {
 		time.Sleep(15 * time.Second)
 		if w.task == nil {
@@ -52,7 +51,6 @@ func (w *work) getstatus() {
 		if w.result != "" {
 			log.Println("sending finished...")
 			values = url.Values{"cmd": {"finished"}, "trytes": {string(w.result)}}
-			finished = true
 		} else {
 			values = url.Values{"cmd": {"getstatus"}}
 		}
@@ -67,8 +65,7 @@ func (w *work) getstatus() {
 			log.Print(err)
 			continue
 		}
-		finished = !status.Working
-		if finished {
+		if !status.Working {
 			w.task.StopPow()
 			w.task = nil
 			w.result = ""
@@ -95,7 +92,7 @@ func (w *work) getwork() {
 			continue
 		}
 		var task common.Task
-		if err := readJSON(resp, &task); err != nil {
+		if err = readJSON(resp, &task); err != nil {
 			log.Print(err)
 			continue
 		}
