@@ -1,0 +1,24 @@
+hash: c31c6dc70676696e5473ddaa4f09dd0e838cf3de857410cd75a2a2a446889362
+updated: 2017-05-30T23:37:17.467390842+09:00
+imports:
+- name: github.com/didip/tollbooth
+  version: de229036b78daed1a011b643519bde8d12f36411
+  subpackages:
+  - config
+  - errors
+  - libstring
+- name: github.com/iotaledger/giota
+  version: 4eefd3607d0e6147ea3db1c294490dfb6aa86cda
+  subpackages:
+  - cl
+- name: golang.org/x/net
+  version: f315505cf3349909cdf013ea56690da34e96a451
+  subpackages:
+  - context
+- name: golang.org/x/time
+  version: f51c12702a4d776e4c1fa9b0fabab841babae631
+  subpackages:
+  - rate
+- name: gopkg.in/natefinch/lumberjack.v2
+  version: 8ec9c6b748e0c75183863d208c8442319ddc5321
+testImports: []

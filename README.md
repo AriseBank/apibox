@@ -18,6 +18,13 @@ You will need C compiler to compile PoW routine in C.
 
 You will need C compiler and OpenCL environemnt(hardware and software) to compile PoW routine for GPU.
 
+Use glide to install the dependencies:
+
+```
+# glide install
+```
+
+
 Build the server :
 
 ```
