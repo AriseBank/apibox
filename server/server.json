@@ -3,5 +3,6 @@
     "listen_port":14265,
     "iri_server_port":"",
     "allowed_request":["::1","192.168.1.0/24"],
-    "allowed_worker":["192.168.1.0/24"]
+    "allowed_worker":["::1","192.168.1.0/24"],
+    "standalone":false
 }

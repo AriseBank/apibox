@@ -7,20 +7,46 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
-	"net"
 	"net/http"
-	"strings"
+	"strconv"
 	"time"
 
 	"github.com/didip/tollbooth"
-	"github.com/iotaledger/giota"
-
 	"github.com/iotaledger/apibox/common"
+	"github.com/iotaledger/giota"
 )
 
-//APIHandler handles API HTTP request
-type APIHandler struct {
-	cfg *Config
+//Config contains configs for server.
+type Config struct {
+	Debug        bool     `json:"debug"`
+	ListenPort   int      `json:"listen_port"`
+	IRIserver    string   `json:"iri_server_port"`
+	AllowRequest []string `json:"allowed_request"`
+	AllowWorker  []string `json:"allowed_worker"`
+	Standalone   bool     `json:"standalone"`
+}
+
+//Handler handles API HTTP request
+type Handler struct {
+	cfg     *Config
+	nWorker int
+	result  chan giota.Trytes
+	ready   chan struct{}
+	task    *common.Task
+}
+
+func newHandler(cfg *Config) *Handler {
+	return &Handler{
+		cfg:    cfg,
+		ready:  make(chan struct{}, 1),
+		result: make(chan giota.Trytes),
+	}
+}
+
+func (h *Handler) reset() {
+	h.nWorker = 0
+	h.task = nil
+	<-h.ready
 }
 
 func bypass(iri string, w http.ResponseWriter, b []byte) error {
@@ -55,37 +81,14 @@ func bypass(iri string, w http.ResponseWriter, b []byte) error {
 	return err
 }
 
-func loop(f func() error) error {
-	i := 0
-	var err error
-	for i = 0; i < 5; i++ {
-		if err = f(); err == nil {
-			break
-		}
+//ServeAPI handles API.
+//If not AttachToTangle command, just call IRI server and returns its response.
+//If AttachToTangle, do PoW by myself or workers.
+func (h *Handler) ServeAPI(w http.ResponseWriter, r *http.Request) {
+	if !common.Allowed(h.cfg.AllowRequest, r.RemoteAddr) {
+		err := errors.New(r.RemoteAddr + " not allowed")
 		log.Print(err)
-		continue
-	}
-	if i == 5 {
-		return err
-	}
-	return nil
-}
-
-//Command is for getting command in request json.
-type Command struct {
-	Command string `json:"command"`
-}
-
-func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ok, err := allowed(h.cfg.AllowRequest, r.RemoteAddr)
-	if err != nil {
-		log.Print(err)
-	}
-	if !ok {
-		log.Print(r.RemoteAddr + " not allowed")
-	}
-	if err != nil || !ok {
-		w.WriteHeader(400)
+		common.ErrResp(w, err)
 		return
 	}
 
@@ -94,10 +97,12 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(400)
 		return
 	}
-	var c Command
+	var c struct {
+		Command string `json:"command"`
+	}
 	json.Unmarshal(b, &c)
 	if c.Command != "attachToTangle" {
-		err := loop(func() error {
+		err := common.Loop(func() error {
 			return bypass(h.cfg.IRIserver, w, b)
 		})
 		if err != nil {
@@ -105,20 +110,126 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if err := attachToTangle(w, b); err != nil {
+	if err := h.attachToTangle(w, b); err != nil {
 		log.Print(err)
-		w.WriteHeader(400)
+		common.ErrResp(w, err)
 	}
 }
 
-func attachToTangle(w http.ResponseWriter, b []byte) error {
+//ServeControl handles controls.
+func (h *Handler) ServeControl(w http.ResponseWriter, r *http.Request) {
+	cmd := r.FormValue("cmd")
+	if h.cfg.Standalone {
+		if cmd != "getStatus" {
+			log.Print("cannot call control while standalone mode")
+			w.WriteHeader(400)
+			return
+		}
+	}
+	if !common.Allowed(h.cfg.AllowWorker, r.RemoteAddr) {
+		log.Print(r.RemoteAddr + " note allowed")
+		w.WriteHeader(400)
+		return
+	}
+	switch cmd {
+	case "getwork":
+		var t common.Task
+		if h.task != nil {
+			t = *h.task
+		}
+		t.Trytes = common.Incr(t.Trytes, h.nWorker)
+		h.nWorker++
+		common.WriteJSON(w, t)
+	case "finished":
+		trytes := giota.Trytes(r.FormValue("Trytes"))
+		tx, err := giota.NewTransaction(trytes)
+		if err != nil {
+			log.Print(err)
+			return
+		}
+		if !tx.HasValidNonce(h.task.MinWeightMagnitude) {
+			log.Print("invalid MinWieightMagniture", tx.Hash())
+			return
+		}
+		h.result <- trytes
+		h.reset()
+	case "getstatus":
+		id := r.FormValue("ID")
+		if id != "" && id != strconv.Itoa(int(h.task.ID)) {
+			log.Print("incorrect ID", id)
+			w.WriteHeader(400)
+			return
+		}
+		isWorking := false
+		if h.task != nil {
+			isWorking = true
+		}
+		common.WriteJSON(w, &common.Status{
+			Task:    h.task,
+			N:       h.nWorker,
+			Working: isWorking,
+		})
+	}
+}
+
+func (h *Handler) goPow() {
+	go func() {
+		for {
+			if h.task == nil {
+				time.Sleep(15 * time.Second)
+				continue
+			}
+			trytes, err := h.task.Pow()
+			if err != nil {
+				log.Print(err)
+				continue
+			}
+			h.task = nil
+			h.result <- trytes
+			<-h.ready
+		}
+	}()
+}
+
+func (h *Handler) attachToTangle(w http.ResponseWriter, b []byte) error {
 	var req giota.AttachToTangleRequest
 	if err := json.Unmarshal(b, &req); err != nil {
 		return err
 	}
-	resp, err := common.HandleAttachToTangle(&req)
-	if err != nil {
-		return err
+	if len(req.Trytes) < 1 {
+		return errors.New("no trytes supplied")
+	}
+	outTrytes := make([]giota.Transaction, len(req.Trytes))
+	var prevTxHash giota.Trytes
+
+	s := time.Now()
+	for i, ts := range req.Trytes {
+		if prevTxHash == "" {
+			ts.TrunkTransaction = req.TrunkTransaction
+			ts.BranchTransaction = req.BranchTransaction
+		} else {
+			ts.TrunkTransaction = prevTxHash
+			ts.BranchTransaction = req.TrunkTransaction
+		}
+		t := &common.Task{
+			ID:                 time.Now().Unix(),
+			MinWeightMagnitude: req.MinWeightMagnitude,
+			Trytes:             ts.Trytes(),
+		}
+		h.ready <- struct{}{}
+		h.task = t
+		prevTxHash = <-h.result
+		tx, err := giota.NewTransaction(prevTxHash)
+		if err != nil {
+			return err
+		}
+		outTrytes[i] = *tx
+	}
+
+	finishedAt := time.Now().Unix()
+	resp := &giota.AttachToTangleResponse{
+		Trytes:   outTrytes,
+		Duration: finishedAt - s.Unix(),
 	}
 	bs, err := json.Marshal(resp)
 	if err != nil {
@@ -128,51 +239,6 @@ func attachToTangle(w http.ResponseWriter, b []byte) error {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	_, err = w.Write(bs)
 	return err
-}
-
-//Config contains configs for server.
-type Config struct {
-	Debug        bool     `json:"debug"`
-	ListenPort   int      `json:"listen_port"`
-	IRIserver    string   `json:"iri_server_port"`
-	AllowRequest []string `json:"allowed_request"`
-	AllowWorker  []string `json:"allowed_worker"`
-}
-
-func allowed(cs []string, remote string) (bool, error) {
-	ip, _, err := net.SplitHostPort(remote)
-	if err != nil {
-		return false, errors.New("invalid remote address " + err.Error())
-	}
-	r := net.ParseIP(ip)
-	if r == nil {
-		return false, errors.New("invalid remote address " + remote)
-	}
-	for _, item := range cs {
-		if strings.Index(item, "-") >= 0 {
-			cs = append(cs, strings.Split(item, "-")...)
-		}
-	}
-	for _, item := range cs {
-		if strings.Index(item, "/") < 0 {
-			a := net.ParseIP(item)
-			if a == nil {
-				log.Fatal("invalid IP address in config file", item)
-			}
-			if r.Equal(a) {
-				return true, nil
-			}
-			continue
-		}
-		_, a, err := net.ParseCIDR(item)
-		if err != nil {
-			log.Fatal("invalid IP address in config file", err)
-		}
-		if a.Contains(r) {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 func main() {
@@ -192,10 +258,10 @@ func main() {
 	}
 	log.Print("using IRI server ", cfg.IRIserver)
 
-	h := APIHandler{
-		cfg: &cfg,
-	}
-	http.Handle("/", tollbooth.LimitFuncHandler(tollbooth.NewLimiter(10, time.Second), h.ServeHTTP))
+	h := newHandler(&cfg)
+
+	http.Handle("/", tollbooth.LimitFuncHandler(tollbooth.NewLimiter(10, time.Second), h.ServeAPI))
+	http.Handle("/control", tollbooth.LimitFuncHandler(tollbooth.NewLimiter(10, time.Second), h.ServeControl))
 
 	s := &http.Server{
 		Addr:           fmt.Sprintf(":%d", cfg.ListenPort),
@@ -203,6 +269,9 @@ func main() {
 		ReadTimeout:    3 * time.Minute,
 		WriteTimeout:   3 * time.Minute,
 		MaxHeaderBytes: 1 << 20,
+	}
+	if cfg.Standalone {
+		h.goPow()
 	}
 	log.Println("start server on port", cfg.ListenPort)
 	log.Fatal(s.ListenAndServe())

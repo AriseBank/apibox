@@ -1,25 +1,19 @@
-# IOTA apibox
+[![Build Status](https://travis-ci.org/iotaledger/apibox.svg?branch=master)](https://travis-ci.org/iotaledger/apibox)
+[![GoDoc](https://godoc.org/github.com/iotaledger/apibox?status.svg)](https://godoc.org/github.com/iotaledger/apibox)
+[![GitHub license](https://img.shields.io/badge/license-MIT-blue.svg)](https://raw.githubusercontent.com/iotaledger/apibox/master/LICENSE)
+
+# Status: Debugging, not work.
+
+# :baby_chick: IOTA APIBOX
 
 ## API endpoints
 
-All endpoints except `attachToTangle` mirror IRI behaviour, i.e. they expect the 
+All APIs of IOTA except `attachToTangle` mirror IRI behaviour, i.e. they expect the 
 same json and will return the same answer unless there's an error caused by the
 webserver itself.
 
-- POST /commands/getNodeInfo
-- POST /commands/getTips
-- POST /commands/findTransactions
-- POST /commands/getTrytes
-- POST /commands/getInclusionStates
-- POST /commands/getBalances
-- POST /commands/getTransactionsToApprove
-- POST /commands/broadcastTransactions
-- POST /commands/storeTransactions
-
-`attachToTangle` uses a rate limited queue to guarantee fair distribution of 
-compute resource and to encourage users to setup their own nodes.
-
-- POST /commands/attachToTangle
+`attachToTangle` acts like a _mining pool_ in bitcoin. `worker`s connect to a `server`
+and get and do a part of Proof of Work(PoW) until one of workers finish the PoW.
 
 ## Building
 
@@ -29,8 +23,54 @@ Use glide to install the dependencies:
 # glide install
 ```
 
-and then build the server (or the worker):
+and then build the server :
 
 ```
-# go build -o sandbox-server ./cmd/server
+# go build -o server ./server
 ```
+
+and worker :
+
+```
+# go build -o worker ./worker
+```
+
+If you want to use GPU for PoW, add `-tags=gpu` option.
+
+## Server Settings
+
+`server.json` in server directory is the settings for server. Parameters are:
+
+* `debug`: If true, print log to stdout.
+* `listen_port`: listen port for API and workers.
+* `allowed_request`: IP address or CIDR representation which you want to allow for API caller. 
+* `allowed_worker`: IP address or CIDR representation which you want to allow for worker. 
+* `standalone`: If  true, no worker is accepted and only a server does PoW.
+
+## Worker Arguments
+
+* `verbose`:  If true, print log to stdout.
+* `url`: URL to server, `http://<IP address>:<port>`
+
+## Running APIBOX
+
+Run server:
+
+```
+$ server/server
+```
+
+Run workers as many as you want:
+
+```
+$ work/worker -url="http://server1:14265"
+```
+
+TODO
+=========================
+
+* [ ] Ttests :(
+
+<hr>
+
+Released under the [MIT License](LICENSE).
