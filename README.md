@@ -14,19 +14,13 @@ and get and do a part of Proof of Work(PoW) until one of workers finish the PoW.
 
 ## Building
 
-Use glide to install the dependencies:
-
-```
-# glide install
-```
-
-and then build the server :
+Build the server :
 
 ```
 # go build -o server ./server
 ```
 
-and worker :
+and the worker :
 
 ```
 # go build -o worker ./worker

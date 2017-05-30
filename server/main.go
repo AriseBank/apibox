@@ -62,13 +62,18 @@ func (h *Handler) ServeAPI(w http.ResponseWriter, r *http.Request) {
 
 	b, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		w.WriteHeader(400)
+		log.Print(err)
+		common.ErrResp(w, err)
 		return
 	}
 	var c struct {
 		Command string `json:"command"`
 	}
-	json.Unmarshal(b, &c)
+	if err := json.Unmarshal(b, &c); err != nil {
+		log.Print(err)
+		common.ErrResp(w, err)
+		return
+	}
 	if c.Command != "attachToTangle" {
 		err := common.Loop(func() error {
 			return bypass(h.cfg.IRIserver, w, b)
