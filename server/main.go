@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/didip/tollbooth"
@@ -33,6 +34,7 @@ type Handler struct {
 	result  chan giota.Trytes
 	ready   chan struct{}
 	task    *common.Task
+	sync.RWMutex
 }
 
 func newHandler(cfg *Config) *Handler {
@@ -140,39 +142,56 @@ func (h *Handler) ServeControl(w http.ResponseWriter, r *http.Request) {
 	case "getwork":
 		log.Println("called getwork")
 		var t common.Task
+		h.Lock()
 		if h.task != nil {
 			t = *h.task
 		}
 		t.Trytes = common.Incr(t.Trytes, h.nWorker)
 		h.nWorker++
+		h.Unlock()
 		common.WriteJSON(w, t)
 	case "finished":
 		log.Println("called finished")
+		id := r.FormValue("ID")
+		h.RLock()
+		if h.task == nil {
+			log.Print("no work, already finished?")
+			w.WriteHeader(400)
+			h.RUnlock()
+			return
+		}
+		if id != strconv.Itoa(int(h.task.ID)) {
+			log.Print("incorrect ID", id)
+			w.WriteHeader(400)
+			h.RUnlock()
+			return
+		}
 		trytes := giota.Trytes(r.FormValue("trytes"))
 		tx, err := giota.NewTransaction(trytes)
 		if err != nil {
 			log.Print(err)
+			h.RUnlock()
 			return
 		}
 		if !tx.HasValidNonce(h.task.MinWeightMagnitude) {
 			log.Print("invalid MinWieightMagniture", tx.Hash())
+			h.RUnlock()
 			return
 		}
+		h.RUnlock()
 		h.result <- trytes
+		h.Lock()
 		h.reset()
+		h.Unlock()
 		fallthrough
 	case "getstatus":
 		log.Println("called getstatus")
-		id := r.FormValue("ID")
-		if id != "" && id != strconv.Itoa(int(h.task.ID)) {
-			log.Print("incorrect ID", id)
-			w.WriteHeader(400)
-			return
-		}
+		h.RLock()
 		isWorking := false
 		if h.task != nil {
 			isWorking = true
 		}
+		h.RUnlock()
 		common.WriteJSON(w, &common.Status{
 			Task:    h.task,
 			N:       h.nWorker,
@@ -207,7 +226,9 @@ func (h *Handler) attachToTangle(w http.ResponseWriter, b []byte) error {
 			Trytes:             ts.Trytes(),
 		}
 		h.ready <- struct{}{}
+		h.Lock()
 		h.task = t
+		h.Unlock()
 		prevTxHash = <-h.result
 		tx, err := giota.NewTransaction(prevTxHash)
 		if err != nil {

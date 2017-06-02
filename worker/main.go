@@ -3,11 +3,14 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
 	"time"
+
+	"sync"
 
 	"github.com/iotaledger/apibox/common"
 	"github.com/iotaledger/giota"
@@ -17,6 +20,7 @@ type work struct {
 	server string
 	result giota.Trytes
 	task   *common.Task
+	sync.RWMutex
 }
 
 func readJSON(resp *http.Response, t interface{}) error {
@@ -45,15 +49,18 @@ func (w *work) getstatus() {
 	client := new(http.Client)
 	for {
 		time.Sleep(15 * time.Second)
+		w.RLock()
 		if w.task == nil {
+			w.RUnlock()
 			continue
 		}
 		if w.result != "" {
 			log.Println("sending finished...")
-			values = url.Values{"cmd": {"finished"}, "trytes": {string(w.result)}}
+			values = url.Values{"cmd": {"finished"}, "ID": {fmt.Sprintf("%d", w.task.ID)}, "trytes": {string(w.result)}}
 		} else {
 			values = url.Values{"cmd": {"getstatus"}}
 		}
+		w.RUnlock()
 		req.URL.RawQuery = values.Encode()
 		resp, err := client.Do(req)
 		if err != nil {
@@ -61,15 +68,18 @@ func (w *work) getstatus() {
 			continue
 		}
 		var status common.Status
-		if err := readJSON(resp, &status); err != nil {
+		if err := readJSON(resp, &status); err == nil {
+			if status.Working {
+				continue
+			}
+		} else {
 			log.Print(err)
-			continue
 		}
-		if !status.Working {
-			w.task.StopPow()
-			w.task = nil
-			w.result = ""
-		}
+		w.task.StopPow()
+		w.Lock()
+		w.task = nil
+		w.result = ""
+		w.Unlock()
 	}
 }
 
@@ -100,8 +110,10 @@ func (w *work) getwork() {
 			log.Println("no work...")
 			continue
 		}
+		w.Lock()
 		w.task = &task
 		w.result, err = task.Pow()
+		w.Unlock()
 		if err != nil {
 			log.Print(err)
 			continue
