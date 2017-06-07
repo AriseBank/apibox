@@ -1,6 +1,8 @@
 package common
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,8 +11,14 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"regexp"
 	"strings"
+	"time"
 
+	"github.com/didip/tollbooth"
+	"github.com/didip/tollbooth/config"
+	terrors "github.com/didip/tollbooth/errors"
+	"github.com/didip/tollbooth/libstring"
 	"github.com/iotaledger/giota"
 	"github.com/natefinch/lumberjack"
 )
@@ -61,8 +69,7 @@ func (t *Task) Pow() (giota.Trytes, error) {
 		return "", err
 	}
 	log.Println("finished PoW")
-	tx := t.Trytes[:len(t.Trytes)-giota.NonceTrinarySize/3] + out
-	return tx, nil
+	return out, nil
 }
 
 //StopPow stops PoW
@@ -167,4 +174,60 @@ func Allowed(cs []string, remote string) bool {
 		}
 	}
 	return false
+}
+
+// ParseAuthorizationHeader expects a string in the form of
+// `token authtoken` and returns the `authtoken` or an empty string.
+func ParseAuthorizationHeader(h string) string {
+	parts := regexp.MustCompile(`\s+`).Split(h, 2)
+	if len(parts) != 2 {
+		return ""
+	} else if strings.ToLower(parts[0]) != "token" {
+		return ""
+	}
+
+	return strings.TrimSpace(parts[1])
+}
+
+//IsValid returns true if token is in tokens.
+func IsValid(token string, tokens []string) bool {
+	t := sha256.Sum256([]byte(token))
+	b64 := base64.StdEncoding.EncodeToString(t[:])
+	for _, tk := range tokens {
+		if tk == b64 {
+			return true
+		}
+	}
+	return false
+}
+
+//CmdLimiter define rate limite.
+type CmdLimiter struct {
+	limiters map[string]*config.Limiter
+	fallback *config.Limiter
+}
+
+//NewCmdLimiter creates and returns CmdLimiter struct.
+func NewCmdLimiter(limits map[string]int64, def int64) *CmdLimiter {
+	limiters := map[string]*config.Limiter{}
+	for k, v := range limits {
+		limiters[k] = tollbooth.NewLimiter(v, 1*time.Minute)
+	}
+
+	defLim := tollbooth.NewLimiter(def, 1*time.Minute)
+	clim := &CmdLimiter{fallback: defLim, limiters: limiters}
+
+	return clim
+}
+
+//Limit returns HttpError if over limit.
+func (c *CmdLimiter) Limit(cmd string, r *http.Request) *terrors.HTTPError {
+	l, ok := c.limiters[cmd]
+	remoteIP := libstring.RemoteIP(c.fallback.IPLookups, r)
+	keys := []string{remoteIP, cmd}
+	if !ok { // Use fallback if cmd was not found.
+		return tollbooth.LimitByKeys(c.fallback, keys)
+	}
+
+	return tollbooth.LimitByKeys(l, keys)
 }

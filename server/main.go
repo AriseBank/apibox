@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"strconv"
 	"sync"
 	"time"
 
@@ -25,30 +24,38 @@ type Config struct {
 	AllowWorker  []string `json:"allowed_worker"`
 	Debug        bool     `json:"debug"`
 	Standalone   bool     `json:"standalone"`
+	Tokens       []string `json:"tokens"`
 }
 
 //Handler handles API HTTP request
 type Handler struct {
-	cfg     *Config
-	nWorker int
-	result  chan giota.Trytes
-	ready   chan struct{}
-	task    *common.Task
+	cfg        *Config
+	nWorker    int
+	ctask      chan *common.Task
+	task       *common.Task
+	result     chan giota.Trytes
+	cmdLimiter *common.CmdLimiter
+	wwait      *sync.Cond
+	wfin       *sync.Cond
 	sync.RWMutex
+	finished chan giota.Trytes
 }
 
 func newHandler(cfg *Config) *Handler {
 	return &Handler{
-		cfg:    cfg,
-		ready:  make(chan struct{}, 1),
-		result: make(chan giota.Trytes),
+		cfg:        cfg,
+		ctask:      make(chan *common.Task),
+		result:     make(chan giota.Trytes),
+		finished:   make(chan giota.Trytes),
+		cmdLimiter: common.NewCmdLimiter(map[string]int64{"attachToTangle": 1}, 5),
+		wwait:      sync.NewCond(&sync.Mutex{}),
+		wfin:       sync.NewCond(&sync.Mutex{}),
 	}
 }
 
 func (h *Handler) reset() {
 	h.nWorker = 0
 	h.task = nil
-	<-h.ready
 }
 
 //ServeAPI handles API.
@@ -75,6 +82,18 @@ func (h *Handler) ServeAPI(w http.ResponseWriter, r *http.Request) {
 		log.Print(err)
 		common.ErrResp(w, err)
 		return
+	}
+	hdr := r.Header.Get(http.CanonicalHeaderKey("Authorization"))
+	token := common.ParseAuthorizationHeader(hdr)
+	if !common.IsValid(token, h.cfg.Tokens) {
+		log.Print("not authed")
+		limitReached := h.cmdLimiter.Limit(c.Command, r)
+		if limitReached != nil {
+			common.ErrResp(w, limitReached)
+			return
+		}
+	} else {
+		log.Print("authed")
 	}
 	if c.Command != "attachToTangle" {
 		err := common.Loop(func() error {
@@ -123,83 +142,6 @@ func bypass(iri string, w http.ResponseWriter, b []byte) error {
 	return err
 }
 
-//ServeControl handles controls.
-func (h *Handler) ServeControl(w http.ResponseWriter, r *http.Request) {
-	cmd := r.FormValue("cmd")
-	if h.cfg.Standalone {
-		if cmd != "getStatus" {
-			log.Print("cannot call control while standalone mode")
-			w.WriteHeader(400)
-			return
-		}
-	}
-	if !common.Allowed(h.cfg.AllowWorker, r.RemoteAddr) {
-		log.Print(r.RemoteAddr + " note allowed")
-		w.WriteHeader(400)
-		return
-	}
-	switch cmd {
-	case "getwork":
-		log.Println("called getwork")
-		var t common.Task
-		h.Lock()
-		if h.task != nil {
-			t = *h.task
-		}
-		t.Trytes = common.Incr(t.Trytes, h.nWorker)
-		h.nWorker++
-		h.Unlock()
-		common.WriteJSON(w, t)
-	case "finished":
-		log.Println("called finished")
-		id := r.FormValue("ID")
-		h.RLock()
-		if h.task == nil {
-			log.Print("no work, already finished?")
-			w.WriteHeader(400)
-			h.RUnlock()
-			return
-		}
-		if id != strconv.Itoa(int(h.task.ID)) {
-			log.Print("incorrect ID", id)
-			w.WriteHeader(400)
-			h.RUnlock()
-			return
-		}
-		trytes := giota.Trytes(r.FormValue("trytes"))
-		tx, err := giota.NewTransaction(trytes)
-		if err != nil {
-			log.Print(err)
-			h.RUnlock()
-			return
-		}
-		if !tx.HasValidNonce(h.task.MinWeightMagnitude) {
-			log.Print("invalid MinWieightMagniture", tx.Hash())
-			h.RUnlock()
-			return
-		}
-		h.RUnlock()
-		h.result <- trytes
-		h.Lock()
-		h.reset()
-		h.Unlock()
-		fallthrough
-	case "getstatus":
-		log.Println("called getstatus")
-		h.RLock()
-		isWorking := false
-		if h.task != nil {
-			isWorking = true
-		}
-		h.RUnlock()
-		common.WriteJSON(w, &common.Status{
-			Task:    h.task,
-			N:       h.nWorker,
-			Working: isWorking,
-		})
-	}
-}
-
 func (h *Handler) attachToTangle(w http.ResponseWriter, b []byte) error {
 	var req giota.AttachToTangleRequest
 	if err := json.Unmarshal(b, &req); err != nil {
@@ -225,10 +167,7 @@ func (h *Handler) attachToTangle(w http.ResponseWriter, b []byte) error {
 			MinWeightMagnitude: req.MinWeightMagnitude,
 			Trytes:             ts.Trytes(),
 		}
-		h.ready <- struct{}{}
-		h.Lock()
-		h.task = t
-		h.Unlock()
+		h.ctask <- t
 		prevTxHash = <-h.result
 		tx, err := giota.NewTransaction(prevTxHash)
 		if err != nil {
@@ -252,21 +191,121 @@ func (h *Handler) attachToTangle(w http.ResponseWriter, b []byte) error {
 	return err
 }
 
+func (h *Handler) proxy() {
+	for {
+		t := <-h.ctask
+		h.Lock()
+		h.task = t
+		h.Unlock()
+		h.wwait.Broadcast()
+		f := <-h.finished
+		h.wfin.Broadcast()
+		h.Lock()
+		h.reset()
+		h.Unlock()
+		h.result <- f
+	}
+}
+
+//ServeControl handles controls.
+func (h *Handler) ServeControl(w http.ResponseWriter, r *http.Request) {
+	cmd := r.FormValue("cmd")
+	if !common.Allowed(h.cfg.AllowWorker, r.RemoteAddr) {
+		log.Print(r.RemoteAddr + " note allowed")
+		w.WriteHeader(400)
+		return
+	}
+	switch cmd {
+	case "getwork":
+		log.Println("called getwork")
+		h.RLock()
+		t := h.task
+		h.RUnlock()
+		if t == nil {
+			h.wwait.L.Lock()
+			h.wwait.Wait()
+			h.wwait.L.Unlock()
+		}
+		t = h.task
+		if t == nil {
+			t = &common.Task{}
+		}
+		t.Trytes = common.Incr(t.Trytes, 1)
+		h.Lock()
+		h.nWorker++
+		h.Unlock()
+		common.WriteJSON(w, t)
+	case "finished":
+		log.Println("called finished")
+		id := r.FormValue("ID")
+		h.RLock()
+		t := h.task
+		h.RUnlock()
+		if t == nil {
+			log.Print("no work, already finished?")
+			w.WriteHeader(400)
+			return
+		}
+		h.RLock()
+		tid := t.ID
+		h.RUnlock()
+		if id != fmt.Sprintf("%d", tid) {
+			log.Print("id is incorrect now:", tid, " from worker:", id)
+			w.WriteHeader(400)
+			return
+		}
+		h.RLock()
+		try := t.Trytes
+		h.RUnlock()
+		nonce := giota.Trytes(r.FormValue("trytes"))
+		trytes := try[:len(try)-giota.NonceTrinarySize/3] + nonce
+		tx, err := giota.NewTransaction(trytes)
+		if err != nil {
+			log.Print(err)
+			return
+		}
+		h.RLock()
+		mwm := t.MinWeightMagnitude
+		h.RUnlock()
+		if !tx.HasValidNonce(mwm) {
+			log.Print("invalid MinWieightMagniture", tx.Hash())
+			return
+		}
+		h.finished <- trytes
+	case "getstatus":
+		log.Println("called getstatus")
+		isWorking := false
+		h.RLock()
+		t := h.task
+		h.RUnlock()
+		if t != nil {
+			h.wfin.L.Lock()
+			h.wfin.Wait()
+			h.wfin.L.Unlock()
+		}
+		if t != nil {
+			isWorking = true
+		}
+		common.WriteJSON(w, &common.Status{
+			Task:    h.task,
+			N:       h.nWorker,
+			Working: isWorking,
+		})
+	}
+}
+
 func (h *Handler) goPow() {
 	go func() {
 		for {
-			if h.task == nil {
-				time.Sleep(15 * time.Second)
-				continue
-			}
-			trytes, err := h.task.Pow()
+			t := <-h.ctask
+			nonce, err := t.Pow()
 			if err != nil {
 				log.Print(err)
 				continue
 			}
+			trytes := h.task.Trytes[:len(h.task.Trytes)-giota.NonceTrinarySize/3] + nonce
 			h.task = nil
 			h.result <- trytes
-			<-h.ready
 		}
 	}()
 }
@@ -291,8 +330,10 @@ func main() {
 	h := newHandler(&cfg)
 
 	http.Handle("/", tollbooth.LimitFuncHandler(tollbooth.NewLimiter(10, time.Second), h.ServeAPI))
-	http.Handle("/control", tollbooth.LimitFuncHandler(tollbooth.NewLimiter(10, time.Second), h.ServeControl))
-
+	if !h.cfg.Standalone {
+		go h.proxy()
+		http.HandleFunc("/control", h.ServeControl)
+	}
 	s := &http.Server{
 		Addr:           fmt.Sprintf(":%d", cfg.ListenPort),
 		Handler:        http.DefaultServeMux,

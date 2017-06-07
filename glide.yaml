@@ -1,7 +1,14 @@
 package: github.com/iotaledger/apibox
 import:
 - package: github.com/didip/tollbooth
+  subpackages:
+  - config
+  - errors
+  - libstring
 - package: github.com/iotaledger/giota
 - package: github.com/natefinch/lumberjack
   vcs: git
   version: 2.0
+- package: golang.org/x/crypto
+  subpackages:
+  - ssh/terminal

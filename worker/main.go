@@ -8,7 +8,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"time"
 
 	"sync"
 
@@ -45,22 +44,15 @@ func (w *work) getstatus() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	var values url.Values
+	values := url.Values{"cmd": {"getstatus"}}
 	client := new(http.Client)
 	for {
-		time.Sleep(15 * time.Second)
 		w.RLock()
-		if w.task == nil {
-			w.RUnlock()
+		t := w.task
+		w.RUnlock()
+		if t == nil {
 			continue
 		}
-		if w.result != "" {
-			log.Println("sending finished...")
-			values = url.Values{"cmd": {"finished"}, "ID": {fmt.Sprintf("%d", w.task.ID)}, "trytes": {string(w.result)}}
-		} else {
-			values = url.Values{"cmd": {"getstatus"}}
-		}
-		w.RUnlock()
 		req.URL.RawQuery = values.Encode()
 		resp, err := client.Do(req)
 		if err != nil {
@@ -83,6 +75,23 @@ func (w *work) getstatus() {
 	}
 }
 
+func (w *work) finished() {
+	var err error
+	req, err := http.NewRequest("GET", w.server+"/control", nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	var values url.Values
+	client := new(http.Client)
+	log.Println("sending finished...")
+	values = url.Values{"cmd": {"finished"}, "ID": {fmt.Sprintf("%d", w.task.ID)}, "trytes": {string(w.result)}}
+	req.URL.RawQuery = values.Encode()
+	_, err = client.Do(req)
+	if err != nil {
+		log.Print(err)
+	}
+}
+
 func (w *work) getwork() {
 	var err error
 	req, err := http.NewRequest("GET", w.server+"/control", nil)
@@ -95,7 +104,6 @@ func (w *work) getwork() {
 	client := new(http.Client)
 
 	for {
-		time.Sleep(15 * time.Second)
 		resp, err := client.Do(req)
 		if err != nil {
 			log.Print(err)
@@ -118,6 +126,7 @@ func (w *work) getwork() {
 			log.Print(err)
 			continue
 		}
+		w.finished()
 	}
 }
 

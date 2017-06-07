@@ -1,5 +1,5 @@
-hash: 936aac57bcf9cbb5f787e7ad6ee601839c3af333a2ff620d34321192f24c0c42
-updated: 2017-05-31T07:42:10.061435949+09:00
+hash: 14f8d1f7d388346051eb8288b74b4fcff5a5f0284867009b7b2c7ceb95a129c1
+updated: 2017-06-07T13:34:30.651522958+09:00
 imports:
 - name: github.com/didip/tollbooth
   version: de229036b78daed1a011b643519bde8d12f36411
@@ -8,16 +8,24 @@ imports:
   - errors
   - libstring
 - name: github.com/iotaledger/giota
-  version: 4eefd3607d0e6147ea3db1c294490dfb6aa86cda
+  version: 18fa9af9e1b24ab0e2a50b1c8b486b065832825c
   subpackages:
   - cl
 - name: github.com/natefinch/lumberjack
-  version: dd45e6a67c53f673bb49ca8a001fd3a63ceb640e
+  version: df99d62fd42d8b3752c8a42c6723555372c02a03
   vcs: git
+- name: golang.org/x/crypto
+  version: e7ba82683099cae71475961448ab8f903ea77c26
+  subpackages:
+  - ssh/terminal
 - name: golang.org/x/net
   version: f315505cf3349909cdf013ea56690da34e96a451
   subpackages:
   - context
+- name: golang.org/x/sys
+  version: b90f89a1e7a9c1f6b918820b3daa7f08488c8594
+  subpackages:
+  - unix
 - name: golang.org/x/time
   version: f51c12702a4d776e4c1fa9b0fabab841babae631
   subpackages:
