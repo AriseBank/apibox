@@ -81,6 +81,7 @@ func (h *Handler) ServeAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.Unmarshal(b, &c); err != nil {
 		log.Print(err)
+		log.Print(string(b))
 		common.ErrResp(w, err)
 		return
 	}

@@ -46,14 +46,8 @@ func (w *work) getstatus() {
 	}
 	values := url.Values{"cmd": {"getstatus"}}
 	client := new(http.Client)
+	req.URL.RawQuery = values.Encode()
 	for {
-		w.RLock()
-		t := w.task
-		w.RUnlock()
-		if t == nil {
-			continue
-		}
-		req.URL.RawQuery = values.Encode()
 		resp, err := client.Do(req)
 		if err != nil {
 			log.Print(err)
@@ -67,11 +61,14 @@ func (w *work) getstatus() {
 		} else {
 			log.Print(err)
 		}
-		w.task.StopPow()
-		w.Lock()
-		w.task = nil
-		w.result = ""
-		w.Unlock()
+		if status.Working == false {
+			w.task.StopPow()
+			w.Lock()
+			w.task = nil
+			w.result = ""
+			w.Unlock()
+			return
+		}
 	}
 }
 
@@ -90,6 +87,9 @@ func (w *work) finished() {
 	if err != nil {
 		log.Print(err)
 	}
+	w.Lock()
+	w.task = nil
+	w.Unlock()
 }
 
 func (w *work) getwork() {
@@ -118,14 +118,20 @@ func (w *work) getwork() {
 			log.Println("no work...")
 			continue
 		}
+		go func() {
+			w.getstatus()
+		}()
 		w.Lock()
 		w.task = &task
-		w.result, err = task.Pow()
 		w.Unlock()
+		result, err := task.Pow()
 		if err != nil {
 			log.Print(err)
 			continue
 		}
+		w.Lock()
+		w.result = result
+		w.Unlock()
 		w.finished()
 	}
 }
@@ -144,9 +150,7 @@ func main() {
 	go func() {
 		w.getwork()
 	}()
-	go func() {
-		w.getstatus()
-	}()
+
 	pause := make(chan struct{})
 	<-pause
 }

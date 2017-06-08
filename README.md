@@ -46,13 +46,13 @@ If you want to use GPU for PoW, add `-tags=gpu` option.
 [server.json](server/server.json) in server directory is the settings for server. Parameters are:
 
 * `listen_port`: listen port for API and workers.
-*  `iri_server_port`: iri server and port, in form of server:port.
+* `iri_server_port`: iri server and port, in form of server:port.
 * `allowed_request`: IP address or CIDR representation which you want to allow for API caller. 
 * `allowed_worker`: IP address or CIDR representation which you want to allow for worker. 
 * `debug`: If true, print log to stdout.
 * `standalone`: If  true, no worker is accepted and only a server does PoW.
 * `tokens`: tokens for authentication.
-* `limit`: limits counts per second for `attatchToTangle`. if 0, no limit.
+* `limit`: limits accesses to `attachToTangle` as counts per second. If 0, no limit.
 
 `tokens` can be made with `mkpasswd`:
 
