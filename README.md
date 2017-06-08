@@ -12,6 +12,8 @@ webserver itself.
 `attachToTangle` acts like a _mining pool_ in bitcoin. `worker`s connect to a `server`
 and get and do a part of Proof of Work(PoW) until one of workers finish the PoW.
 
+`attachToTangle
+
 ## Building
 
 You will need C compiler to compile PoW routine in C.
@@ -50,6 +52,7 @@ If you want to use GPU for PoW, add `-tags=gpu` option.
 * `debug`: If true, print log to stdout.
 * `standalone`: If  true, no worker is accepted and only a server does PoW.
 * `tokens`: tokens for authentication.
+* `limit`: limits counts per second for `attatchToTangle`. if 0, no limit.
 
 `tokens` can be made with `mkpasswd`:
 

@@ -25,6 +25,7 @@ type Config struct {
 	Debug        bool     `json:"debug"`
 	Standalone   bool     `json:"standalone"`
 	Tokens       []string `json:"tokens"`
+	Limit        int64    `json:"limit"`
 }
 
 //Handler handles API HTTP request
@@ -47,7 +48,7 @@ func newHandler(cfg *Config) *Handler {
 		ctask:      make(chan *common.Task),
 		result:     make(chan giota.Trytes),
 		finished:   make(chan giota.Trytes),
-		cmdLimiter: common.NewCmdLimiter(map[string]int64{"attachToTangle": 1}, 5),
+		cmdLimiter: common.NewCmdLimiter(map[string]int64{"attachToTangle": cfg.Limit}, 9999),
 		wwait:      sync.NewCond(&sync.Mutex{}),
 		wfin:       sync.NewCond(&sync.Mutex{}),
 	}
@@ -83,18 +84,6 @@ func (h *Handler) ServeAPI(w http.ResponseWriter, r *http.Request) {
 		common.ErrResp(w, err)
 		return
 	}
-	hdr := r.Header.Get(http.CanonicalHeaderKey("Authorization"))
-	token := common.ParseAuthorizationHeader(hdr)
-	if !common.IsValid(token, h.cfg.Tokens) {
-		log.Print("not authed")
-		limitReached := h.cmdLimiter.Limit(c.Command, r)
-		if limitReached != nil {
-			common.ErrResp(w, limitReached)
-			return
-		}
-	} else {
-		log.Print("authed")
-	}
 	if c.Command != "attachToTangle" {
 		err := common.Loop(func() error {
 			return bypass(h.cfg.IRIserver, w, b)
@@ -103,6 +92,18 @@ func (h *Handler) ServeAPI(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(400)
 		}
 		return
+	}
+	hdr := r.Header.Get(http.CanonicalHeaderKey("Authorization"))
+	token := common.ParseAuthorizationHeader(hdr)
+	if !common.IsValid(token, h.cfg.Tokens) && h.cfg.Limit != 0 {
+		log.Print("not authed")
+		limitReached := h.cmdLimiter.Limit(c.Command, r)
+		if limitReached != nil {
+			common.ErrResp(w, limitReached)
+			return
+		}
+	} else {
+		log.Print("authed")
 	}
 	if err := h.attachToTangle(w, b); err != nil {
 		log.Print(err)
@@ -268,7 +269,7 @@ func (h *Handler) ServeControl(w http.ResponseWriter, r *http.Request) {
 		mwm := t.MinWeightMagnitude
 		h.RUnlock()
 		if !tx.HasValidNonce(mwm) {
-			log.Print("invalid MinWieightMagniture", tx.Hash())
+			log.Print("invalid MinWieightMagniture ", tx.Hash())
 			return
 		}
 		h.finished <- trytes
