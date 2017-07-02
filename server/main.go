@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/didip/tollbooth"
-	"github.com/iotaledger/apibox/common"
+	"github.com/utamaro/apibox/common"
 	"github.com/iotaledger/giota"
 )
 
